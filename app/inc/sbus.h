@@ -3,9 +3,10 @@
  * SBUS receiver driver.
  *
  * Decodes one SBUS frame per reception. The driver only uses the UART
- * subsystem contract: uart_recv_async() arms one reception, the adapter
- * reports the completed frame through a callback, and the driver re-arms the
- * next reception from task context in sbus_process().
+ * subsystem contract: uart_recv_async() registers a subscription once, the
+ * adapter invokes the callback for every frame without re-arming, and the
+ * callback copies the frame out of the adapter-owned buffer into the receiver
+ * instance.
  */
 
 #ifndef SBUS_H
@@ -89,27 +90,34 @@ struct sbus_data {
  * struct sbus - SBUS receiver instance
  * @msg: last decoded frame, refreshed by sbus_process()
  * @uart: UART port carrying the SBUS signal, provided by the caller
- * @rx_frame: raw receive buffer, filled directly by the adapter
+ * @rx_frame: receive buffer registered with the adapter, owned by it for the
+ *            lifetime of the subscription
+ * @rx_stage: copy of the frame taken inside the callback, read in task context
  * @rx_len: bytes reported by the receive callback
  * @rx_errors: error bitmask reported by the receive callback, see UART_RX_ERR_*
- * @rx_done: set by the receive callback when a reception has finished
- * @rx_armed: task context only, a reception is currently in flight
+ * @rx_done: set by the receive callback when a frame has been staged
+ * @rx_dropped: frames the callback could not stage because @rx_done was still
+ *              set, meaning the application had not consumed the previous frame
  * @new_frame_ready: %true while @msg holds a frame the application has not read
+ * @started: task context only, the receive subscription is registered
  *
- * @rx_frame doubles as the receive buffer, so the adapter may overwrite it as
- * soon as the next reception starts. Read @msg, not @rx_frame, once
- * sbus_process() has returned. @new_frame_ready is cleared by the application
- * after it has consumed @msg.
+ * The adapter receives into @rx_frame and reuses it for every frame, so its
+ * contents are valid only inside sbus_uart_rx_cb(), which copies the frame into
+ * @rx_stage. Everything outside the callback reads @rx_stage or @msg, never
+ * @rx_frame. @new_frame_ready is cleared by the application after it has
+ * consumed @msg.
  */
 struct sbus {
 	struct sbus_data msg;
 	struct uart_dev *uart;
 	sbus_frame_t rx_frame;
+	sbus_frame_t rx_stage;
 	volatile uint16_t rx_len;
 	volatile uint32_t rx_errors;
 	volatile bool rx_done;
-	bool rx_armed;
+	volatile uint32_t rx_dropped;
 	bool new_frame_ready;
+	bool started;
 };
 
 /**
@@ -117,20 +125,36 @@ struct sbus {
  * @s: receiver instance
  * @uart: UART port carrying the SBUS signal, bound by board code
  *
- * Context: task context, before the first sbus_process() call. The first
- * reception is armed by sbus_process(), not here.
+ * Context: task context, before sbus_start(). The receive subscription is not
+ * registered here.
  */
 void sbus_init(struct sbus *s, struct uart_dev *uart);
 
 /**
- * sbus_process() - decode a completed reception and arm the next one
+ * sbus_start() - register the receive subscription
+ * @s: initialized receiver instance
+ *
+ * Context: task context.
+ *
+ * Registers sbus_uart_rx_cb() once, through uart_recv_async(). The
+ * subscription stays registered until uart_abort() is called on @s->uart, so
+ * this is called once, not per frame. Frames arriving before this call are
+ * lost.
+ *
+ * Return: UART_OK on success, negative UART_ERR_* value on failure.
+ */
+int sbus_start(struct sbus *s);
+
+/**
+ * sbus_process() - decode the staged frame
  * @s: receiver instance
  *
  * Context: task context, typically once per main loop iteration.
  *
- * Must be called often enough that the next reception is armed before the
- * transmitter starts the following frame; bytes arriving while no reception
- * is armed are lost.
+ * Consumes the frame staged by the callback, if any. Reception is never
+ * interrupted by this function: calling it less often than the transmitter
+ * sends frames makes the callback drop the newer frame, counted in
+ * @s->rx_dropped, instead of corrupting a frame that is still being read.
  *
  * Return: %true when @s->msg was refreshed, %false otherwise.
  */
@@ -138,13 +162,14 @@ bool sbus_process(struct sbus *s);
 
 /**
  * sbus_uart_rx_cb() - receive callback, registered through uart_recv_async()
- * @dev: UART device that completed the reception
+ * @dev: UART device that received the frame
  * @len: number of bytes received
  * @errors: error bitmask, 0 when the frame is clean, see UART_RX_ERR_*
  * @ctx: receiver instance, passed as @ctx to uart_recv_async()
  *
- * Context: interrupt context. Latches the result only; decoding and re-arming
- * are done by sbus_process() in task context.
+ * Context: interrupt context. Copies the frame out of the adapter-owned buffer
+ * into @s->rx_stage and latches the result; decoding is done by
+ * sbus_process() in task context.
  */
 void sbus_uart_rx_cb(struct uart_dev *dev, size_t len, uint32_t errors,
 		     void *ctx);
@@ -166,7 +191,7 @@ bool sbus_parse(const uint8_t *data, uint16_t len);
  *
  * Context: task context.
  *
- * Decodes @s->rx_frame, which is the buffer the adapter receives into.
+ * Decodes @s->rx_stage, which holds the frame copied out by the callback.
  *
  * Return: %true when @s->msg was refreshed.
  */
@@ -177,15 +202,15 @@ bool sbus_parse_to_msg(struct sbus *s);
  * @s: receiver instance
  * @ch: channel index, %0 to %15
  *
- * Context: any context. Reads the receive buffer, so the result is only
- * valid until the next reception starts; use the decoded values in @s->msg
- * once sbus_process() has returned.
+ * Context: any context. Reads @s->rx_stage, so it sees the last frame staged by
+ * the callback; use the decoded values in @s->msg once sbus_process() has
+ * returned.
  *
  * Return: raw channel value, 11 bit wide.
  */
 static inline uint16_t sbus_get_one_channel(struct sbus *s, uint8_t ch)
 {
-	const uint8_t *raw = s->rx_frame.raw;
+	const uint8_t *raw = s->rx_stage.raw;
 	uint16_t bit_index = ch * 11;
 	uint8_t byte_index = bit_index / 8;
 	uint8_t bit_offset = bit_index % 8;

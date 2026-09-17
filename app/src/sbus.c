@@ -2,6 +2,8 @@
 
 #include "app/inc/sbus.h"
 
+#include <string.h>
+
 bool sbus_parse(const uint8_t *data, uint16_t len)
 {
 	if (len != SBUS_FRAME_SIZE || data[0] != 0x0F ||
@@ -17,12 +19,34 @@ void sbus_init(struct sbus *s, struct uart_dev *uart)
 	*s = (struct sbus){ .uart = uart };
 }
 
+int sbus_start(struct sbus *s)
+{
+	int rc = uart_recv_async(s->uart, s->rx_frame.raw,
+				 sizeof(s->rx_frame.raw), sbus_uart_rx_cb, s);
+
+	s->started = (rc == 0);
+
+	return rc;
+}
+
 void sbus_uart_rx_cb(struct uart_dev *dev, size_t len, uint32_t errors,
 		     void *ctx)
 {
 	struct sbus *s = ctx;
 
 	(void)dev;
+
+	/*
+	 * The adapter reuses rx_frame for every frame, so the frame has to be
+	 * copied out here. A frame that arrives before the previous one was
+	 * consumed is dropped and counted, not written over a staged frame.
+	 */
+	if (s->rx_done) {
+		s->rx_dropped++;
+		return;
+	}
+
+	memcpy(s->rx_stage.raw, s->rx_frame.raw, sizeof(s->rx_stage.raw));
 
 	s->rx_len = (uint16_t)len;
 	s->rx_errors = errors;
@@ -33,25 +57,18 @@ bool sbus_process(struct sbus *s)
 {
 	bool refreshed = false;
 
-	if (s->rx_done) {
-		s->rx_done = false;
-		s->rx_armed = false;
-
-		if (s->rx_errors == 0 && s->rx_len == SBUS_FRAME_SIZE) {
-			refreshed = sbus_parse_to_msg(s);
-
-			if (refreshed) {
-				s->new_frame_ready = true;
-			}
-		}
+	if (!s->rx_done) {
+		return false;
 	}
 
-	if (!s->rx_armed) {
-		int rc = uart_recv_async(s->uart, s->rx_frame.raw,
-					 sizeof(s->rx_frame.raw),
-					 sbus_uart_rx_cb, s);
+	s->rx_done = false;
 
-		s->rx_armed = (rc == 0);
+	if (s->rx_errors == 0 && s->rx_len == SBUS_FRAME_SIZE) {
+		refreshed = sbus_parse_to_msg(s);
+
+		if (refreshed) {
+			s->new_frame_ready = true;
+		}
 	}
 
 	return refreshed;
@@ -91,7 +108,7 @@ static inline SBUS_SWITCH_POS sbus_ch_to_switch(uint16_t raw)
 
 bool sbus_parse_to_msg(struct sbus *s)
 {
-	if (!sbus_parse(s->rx_frame.raw, SBUS_FRAME_SIZE)) {
+	if (!sbus_parse(s->rx_stage.raw, SBUS_FRAME_SIZE)) {
 		return false;
 	}
 
