@@ -7,8 +7,8 @@
  * is performed by the adapter layer.
  */
 
-#ifndef SUBSYSTEM_spi_master_H
-#define SUBSYSTEM_spi_master_H
+#ifndef SUBSYSTEM_SPI_MASTER_H
+#define SUBSYSTEM_SPI_MASTER_H
 
 #include <stddef.h>
 #include <stdint.h>
@@ -22,12 +22,12 @@
  * These values are not used as bitmask flags. Per-transfer errors are
  * reported separately through spi_master_ERR_* bits below.
  */
-#define spi_master_OK 0
-#define spi_master_ERR_PARAM (-1)
-#define spi_master_ERR_TIMEOUT (-2)
-#define spi_master_ERR_IO (-3)
-#define spi_master_ERR_BUSY (-4)
-#define spi_master_ERR_UNSUPPORTED (-5)
+#define SPI_MASTER_OK 0
+#define SPI_MASTER_ERR_PARAM (-1)
+#define SPI_MASTER_ERR_TIMEOUT (-2)
+#define SPI_MASTER_ERR_IO (-3)
+#define SPI_MASTER_ERR_BUSY (-4)
+#define SPI_MASTER_ERR_UNSUPPORTED (-5)
 
 /*
  * Error bits reported in the @errors argument of spi_master_done_cb_t.
@@ -36,39 +36,39 @@
  * multiple error bits at the same time. Callers that do not distinguish
  * between error types may simply test @errors != 0.
  *
- * spi_master_ERR_OVERRUN:    receive data was lost because the adapter or
+ * SPI_MASTER_ERR_OVERRUN:    receive data was lost because the adapter or
  *                            hardware could not consume it in time
- * spi_master_ERR_MODE_FAULT: SPI mode fault, typically caused by a slave
+ * SPI_MASTER_ERR_MODE_FAULT: SPI mode fault, typically caused by a slave
  *                            driving the chip select when not selected
- * spi_master_ERR_ABORTED:    transfer was terminated by hardware error or by
+ * SPI_MASTER_ERR_ABORTED:    transfer was terminated by hardware error or by
  *                            spi_master_abort()
  */
-#define spi_master_ERR_OVERRUN (1u << 0)
-#define spi_master_ERR_MODE_FAULT (1u << 1)
-#define spi_master_ERR_ABORTED (1u << 2)
+#define SPI_MASTER_ERR_OVERRUN (1u << 0)
+#define SPI_MASTER_ERR_MODE_FAULT (1u << 1)
+#define SPI_MASTER_ERR_ABORTED (1u << 2)
 
 /**
  * enum spi_master_mode_t - SPI clock mode
- * @spi_master_MODE_0: CPOL=0, CPHA=0
- * @spi_master_MODE_1: CPOL=0, CPHA=1
- * @spi_master_MODE_2: CPOL=1, CPHA=0
- * @spi_master_MODE_3: CPOL=1, CPHA=1
+ * @SPI_MASTER_MODE_0: CPOL=0, CPHA=0
+ * @SPI_MASTER_MODE_1: CPOL=0, CPHA=1
+ * @SPI_MASTER_MODE_2: CPOL=1, CPHA=0
+ * @SPI_MASTER_MODE_3: CPOL=1, CPHA=1
  */
 typedef enum {
-	spi_master_MODE_0 = 0,
-	spi_master_MODE_1,
-	spi_master_MODE_2,
-	spi_master_MODE_3,
+	SPI_MASTER_MODE_0 = 0,
+	SPI_MASTER_MODE_1,
+	SPI_MASTER_MODE_2,
+	SPI_MASTER_MODE_3,
 } spi_master_mode_t;
 
 /**
  * enum spi_master_bit_order_t - SPI bit order
- * @spi_master_BIT_ORDER_MSB_FIRST: most significant bit first
- * @spi_master_BIT_ORDER_LSB_FIRST: least significant bit first
+ * @SPI_MASTER_BIT_ORDER_MSB_FIRST: most significant bit first
+ * @SPI_MASTER_BIT_ORDER_LSB_FIRST: least significant bit first
  */
 typedef enum {
-	spi_master_BIT_ORDER_MSB_FIRST = 0,
-	spi_master_BIT_ORDER_LSB_FIRST,
+	SPI_MASTER_BIT_ORDER_MSB_FIRST = 0,
+	SPI_MASTER_BIT_ORDER_LSB_FIRST,
 } spi_master_bit_order_t;
 
 /**
@@ -166,7 +166,7 @@ typedef void (*spi_master_done_cb_t)(struct spi_master_dev *dev, size_t len,
  * the adapter or rejected with spi_master_ERR_BUSY.
  *
  * Return: number of bytes transferred on success, negative
- * spi_master_ERR_* value on failure.
+ * SPI_MASTER_ERR_* value on failure.
  */
 int spi_master_transfer(struct spi_master_dev *dev, const void *tx_buf,
 			void *rx_buf, size_t len, uint32_t timeout);
@@ -188,7 +188,7 @@ int spi_master_transfer(struct spi_master_dev *dev, const void *tx_buf,
  * timeout parameter; if the caller needs to cancel the transfer, it calls
  * spi_master_abort().
  *
- * Return: 0 on success, negative spi_master_ERR_* value on failure.
+ * Return: 0 on success, negative SPI_MASTER_ERR_* value on failure.
  */
 int spi_master_transfer_async(struct spi_master_dev *dev, const void *tx_buf,
 			      void *rx_buf, size_t len, spi_master_done_cb_t cb,
@@ -206,13 +206,13 @@ int spi_master_transfer_async(struct spi_master_dev *dev, const void *tx_buf,
  * This is an active abort initiated by the caller. It does not trigger the
  * completion callback, because the caller already knows the operation was
  * cancelled. Passive aborts caused by hardware errors are reported through
- * the completion callback instead, using the spi_master_ERR_ABORTED bit.
+ * the completion callback instead, using the SPI_MASTER_ERR_ABORTED bit.
  *
  * If a callback is currently executing in an ISR, this function waits for it
  * to return, or the adapter serializes the operation.
  *
- * Return: 0 on success, negative spi_master_ERR_* value on failure.
+ * Return: 0 on success, negative SPI_MASTER_ERR_* value on failure.
  */
 int spi_master_abort(struct spi_master_dev *dev);
 
-#endif /* SUBSYSTEM_spi_master_H */
+#endif /* SUBSYSTEM_SPI_MASTER_H */
