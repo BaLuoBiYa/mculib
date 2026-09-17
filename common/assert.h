@@ -27,7 +27,7 @@ void mculib_assert_failed(const char *file, int line, const char *expr);
 	((expr) ? (void)0 : mculib_assert_failed(__FILE__, __LINE__, #expr))
 #else
 #define MCULIB_ASSERT(expr) ((void)0)
-#endif
+#endif /* MCULIB_DEBUG */
 
 /* Mark a parameter or variable as intentionally unused */
 #define MCULIB_UNUSED(x) ((void)(x))

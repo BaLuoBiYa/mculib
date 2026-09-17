@@ -95,12 +95,10 @@ struct spi_master_dev {
  * transfer. The adapter does not interpret @cs_ctx, and does not insert any
  * delay between the chip select change and the transfer.
  *
- * @note Chip select setup and hold timing is the responsibility of this
- *       callback. When @active is non-zero, the callback should assert the
- *       chip select and wait for the required setup time before returning.
- *       When @active is zero, the callback should wait for the required hold
- *       time before deasserting the chip select.
- *
+ * Chip select setup and hold timing is the responsibility of this callback:
+ * when @active is non-zero, the callback should assert the chip select and
+ * wait for the required setup time before returning; when @active is zero, it
+ * should wait for the required hold time before deasserting the chip select.
  * If hardware chip select is used, this callback may be NULL.
  */
 typedef void (*spi_master_cs_ctrl_t)(void *cs_ctx, int active);

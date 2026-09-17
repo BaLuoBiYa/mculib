@@ -5,7 +5,7 @@
 
 #if defined(UART_BACKEND_HOST_MOCK)
 
-#include "adapter/mock/uart_mock.h"
+#include "adapter/mock/inc/uart_mock.h"
 
 struct uart_host_priv {
 	FILE *stream;
@@ -54,6 +54,27 @@ int uart_recv(struct uart_dev *dev, void *buf, size_t len, uint32_t timeout)
 	(void)timeout;
 
 	return UART_ERR_IO;
+}
+
+int uart_recv_async(struct uart_dev *dev, void *buf, size_t max_len,
+		    uart_rx_cb_t cb, void *ctx)
+{
+	struct uart_host_priv *p = dev->priv;
+	size_t n = fread(buf, 1, max_len, p->stream);
+
+	if (n == 0) {
+		return ferror(p->stream) ? UART_ERR_IO : UART_ERR_TIMEOUT;
+	}
+
+	cb(dev, n, 0, ctx);
+	return UART_OK;
+}
+
+int uart_abort(struct uart_dev *dev)
+{
+	(void)dev;
+
+	return UART_OK;
 }
 
 #endif /* UART_BACKEND_HOST_MOCK */

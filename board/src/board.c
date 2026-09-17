@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: MIT */
 
-#include "adapter/mock/uart_mock.h"
-#include "board/board.h"
+#include "adapter/mock/inc/uart_mock.h"
+#include "board/inc/board.h"
 #include <stdio.h>
 
 /* Console UART instance; the board owns its static lifetime. */

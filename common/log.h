@@ -25,7 +25,7 @@
 
 #ifndef MCULIB_LOG_LEVEL
 #define MCULIB_LOG_LEVEL MCULIB_LOG_INFO
-#endif
+#endif /* MCULIB_LOG_LEVEL */
 
 void log_error(const char *fmt, ...);
 void log_warn(const char *fmt, ...);

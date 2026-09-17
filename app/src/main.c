@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: MIT */
 
 #include "subsystems/subsystems_uart.h"
-#include "board/board.h"
+#include "board/inc/board.h"
 
 int main(void)
 {

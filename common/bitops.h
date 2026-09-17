@@ -8,7 +8,7 @@
 #define BIT(n) (1UL << (n))
 #define BIT_MASK(n) (BIT(n) - 1u)
 
-/* a must be a power of two */
+/* A must be a power of two */
 #define ALIGN_UP(x, a) (((x) + ((a) - 1)) & ~((a) - 1))
 #define ALIGN_DOWN(x, a) ((x) & ~((a) - 1))
 
@@ -42,7 +42,7 @@ static inline uint32_t bit_find_first(uint32_t x)
 		n++;
 	}
 	return n;
-#endif
+#endif /* __GNUC__ || __clang__ */
 }
 
 /**
@@ -62,7 +62,7 @@ static inline uint32_t bit_find_last(uint32_t x)
 	while (x >>= 1)
 		n++;
 	return n;
-#endif
+#endif /* __GNUC__ || __clang__ */
 }
 
 #endif /* MCULIB_COMMON_BITOPS_H */

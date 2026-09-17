@@ -4,7 +4,7 @@ BUILD  := build/Debug
 OBJDIR := $(BUILD)/obj
 BIN    := $(BUILD)/hello_uart
 
-SRCS := $(wildcard common/*.c subsystems/*.c adapter/*.c adapter/*/*.c board/*.c app/*.c)
+SRCS := $(wildcard common/*.c subsystems/*.c app/src/*.c board/src/*.c adapter/*/src/*.c)
 OBJS := $(addprefix $(OBJDIR)/,$(SRCS:.c=.o))
 DEPS := $(OBJS:.o=.d)
 
