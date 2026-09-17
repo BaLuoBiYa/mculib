@@ -1,12 +1,11 @@
 /* SPDX-License-Identifier: MIT */
 
 #include "config/backend.h"
+#include "config/instances.h"
 
 #if defined(UART_BACKEND_HOST_MOCK)
 
 #include "adapter/mock/uart_mock.h"
-
-#define UART_HOST_MAX_INSTANCES 2
 
 struct uart_host_priv {
 	FILE *stream;
@@ -16,7 +15,7 @@ struct uart_host_priv {
  * Static pool of adapter-private data, one slot per binding. Slots are never
  * reclaimed: bound devices are expected to live for the whole program.
  */
-static struct uart_host_priv priv_pool[UART_HOST_MAX_INSTANCES];
+static struct uart_host_priv priv_pool[UART_MAX_INSTANCES];
 static int priv_used;
 
 void uart_host_mock_bind(struct uart_dev *dev, FILE *stream,
@@ -25,7 +24,7 @@ void uart_host_mock_bind(struct uart_dev *dev, FILE *stream,
 	/* A stdio stream has no registers to program. */
 	(void)cfg;
 
-	if (priv_used >= UART_HOST_MAX_INSTANCES) {
+	if (priv_used >= UART_MAX_INSTANCES) {
 		return;
 	}
 
