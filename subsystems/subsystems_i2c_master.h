@@ -1,10 +1,6 @@
 /* SPDX-License-Identifier: MIT */
 /*
  * i2c_master subsystem contract.
- *
- * Provides a backend-independent I2C master API for applications and board
- * code. The subsystem layer declares only the contract; all hardware access
- * is performed by the adapter layer.
  */
 
 #ifndef SUBSYSTEM_I2C_MASTER_H
@@ -14,13 +10,8 @@
 #include <stdint.h>
 
 /*
- * Error codes for functions returning int.
- *
- *   >= 0  success: number of messages transferred, or 0 for control APIs
- *   < 0   failure: one of the I2C_ERR_* values below
- *
- * These values are not used as bitmask flags. Per-transfer errors are
- * reported separately through I2C_ERR_* bits below.
+ * Return values: >= 0 is the number of messages transferred, or 0 for control
+ * APIs; < 0 is one of the I2C_ERR_* values below. These are not bitmask flags.
  */
 #define I2C_OK 0
 #define I2C_ERR_PARAM (-1)
@@ -32,18 +23,14 @@
 #define I2C_ERR_ARBITRATION_LOST (-7)
 
 /*
- * Error bits reported in the @errors argument of i2c_master_done_cb_t.
- *
- * These are bitmask flags, not return values. A single transfer may report
- * multiple error bits at the same time. Callers that do not distinguish
- * between error types may simply test @errors != 0.
+ * Error bits for the @errors argument of i2c_master_done_cb_t; a transfer may
+ * report several of them at once.
  *
  * I2C_ERR_ERR_NACK:             slave did not acknowledge
  * I2C_ERR_ERR_ARBITRATION_LOST: bus arbitration was lost
- * I2C_ERR_ERR_BUS:              bus error, typically a misplaced start or
- *                               stop condition
- * I2C_ERR_ERR_OVERRUN:          receive data was lost because the adapter or
- *                               hardware could not consume it in time
+ * I2C_ERR_ERR_BUS:              bus error, typically a misplaced start or stop
+ * I2C_ERR_ERR_OVERRUN:          receive data was lost before it could be
+ *                               consumed
  * I2C_ERR_ERR_ABORTED:          transfer was terminated by hardware error or
  *                               by i2c_master_abort()
  */
@@ -58,9 +45,8 @@
  * @name: debug name, not interpreted by the subsystem layer
  * @priv: adapter-private data, not interpreted by the subsystem layer
  *
- * One instance represents one bound I2C slave device. Instances are created
- * by board code and exported to applications. Multiple instances may share
- * the same physical I2C bus; the adapter serializes access at the bus level.
+ * One instance represents one bound I2C slave device. Multiple instances may
+ * share one physical bus; the adapter serializes access at the bus level.
  */
 struct i2c_master_dev {
 	const char *name;
@@ -73,14 +59,12 @@ struct i2c_master_dev {
  * @rx_buf: buffer to receive into, NULL for a write-only message
  * @len: number of bytes
  *
- * Exactly one of @tx_buf and @rx_buf must be non-NULL. A message with both
- * set is invalid, because I2C is half-duplex. A message with both NULL and
- * @len == 0 is a valid zero-length message, used to probe a device address.
+ * Exactly one of @tx_buf and @rx_buf must be non-NULL; both set is invalid. A
+ * message with both NULL and @len 0 is a zero-length probe of the device
+ * address.
  *
- * A transfer consists of one or more messages. Messages are sent in order,
- * with a repeated start condition between them and a stop condition after
- * the last one. This is the standard way to implement register access:
- * write the register address, then read the data, in a single transfer.
+ * Messages are sent in order, with a repeated start between them and a stop
+ * after the last one.
  */
 struct i2c_msg {
 	const void *tx_buf;
@@ -94,10 +78,7 @@ struct i2c_msg {
  * @address: slave address, right-aligned
  * @address_bits: address width, 7 or 10
  *
- * Describes the bus parameters and the slave address of a device. The board
- * provides one of these when it binds the device. Runtime reconfiguration is
- * not provided by the subsystem layer; it is done through board-level
- * re-binding.
+ * Fixed by board code at binding time; not reconfigurable at runtime.
  */
 struct i2c_master_config {
 	uint32_t clock_hz;
@@ -106,24 +87,22 @@ struct i2c_master_config {
 };
 
 /**
- * typedef i2c_master_done_cb_t - asynchronous transfer completion callback
+ * typedef i2c_master_done_cb_t - transfer completion callback
  * @dev: I2C master device that completed the transfer
- * @num_msgs: number of messages successfully transferred, always non-negative
- * @errors: error bitmask, 0 if no error occurred, see I2C_ERR_ERR_*
+ * @num_msgs: number of messages transferred successfully
+ * @errors: error bitmask, 0 when clean, see I2C_ERR_ERR_*
  * @ctx: user context passed to i2c_master_transfer_async()
  *
- * Context: interrupt context (executed directly inside the ISR).
+ * Context: interrupt context.
  *
- * @num_msgs is the number of messages that completed successfully. If the
- * transfer was aborted in the middle, it is less than the total number of
- * messages, and @errors is non-zero.
+ * Invoked once per i2c_master_transfer_async() call, after which @msgs and its
+ * buffers may be released. @num_msgs is smaller than the requested count when
+ * the transfer was aborted in the middle, with @errors non-zero. @ctx must stay
+ * valid until the callback or i2c_master_abort() returns.
  *
- * The callback must not block, sleep, wait, allocate memory, or call any
- * subsystem API. Execution time must be bounded.
- *
- * The callback may run concurrently with task-context operations on the same
- * device. The adapter must guarantee API atomicity, or the callback must be
- * restricted to setting a flag without touching the device.
+ * Must not block, sleep, wait, allocate, or call any subsystem API; execution
+ * time must be bounded. May run concurrently with task context on the same
+ * device.
  */
 typedef void (*i2c_master_done_cb_t)(struct i2c_master_dev *dev,
 				     size_t num_msgs, uint32_t errors,
@@ -138,13 +117,9 @@ typedef void (*i2c_master_done_cb_t)(struct i2c_master_dev *dev,
  *
  * Context: task context.
  *
- * Transfers @num_msgs messages in order. Each message is either a write or a
- * read, never both. Between messages, a repeated start condition is issued;
- * after the last message, a stop condition is issued.
- *
- * The address and address width are taken from the device configuration.
- * Concurrent calls on the same device are serialized by the adapter or
- * rejected with I2C_ERR_BUSY.
+ * The address and address width come from the device configuration. Concurrent
+ * calls on the same device are serialized by the adapter or rejected with
+ * I2C_ERR_BUSY.
  *
  * Return: number of messages transferred on success, negative I2C_ERR_*
  * value on failure.
@@ -158,17 +133,15 @@ int i2c_master_transfer(struct i2c_master_dev *dev, const struct i2c_msg *msgs,
  * @msgs: array of messages to transfer, must remain valid until @cb is
  *        invoked
  * @num_msgs: number of messages in @msgs
- * @cb: completion callback
+ * @cb: completion callback, must not be NULL, invoked exactly once
  * @ctx: user context passed to @cb
  *
  * Context: task context.
  *
- * Starts an asynchronous transfer of @num_msgs messages. The @msgs array and
- * the buffers it points to must remain valid until @cb is invoked.
- *
- * Once started, the transfer has only two outcomes: completion or failure,
- * both reported through @cb. There is no separate timeout parameter; if the
- * caller needs to cancel the transfer, it calls i2c_master_abort().
+ * @cb reports completion or failure; there is no timeout parameter, cancel the
+ * transfer with i2c_master_abort(). @msgs and its buffers must remain valid
+ * until @cb is invoked, and may be released when @cb or i2c_master_abort()
+ * returns.
  *
  * Return: 0 on success, negative I2C_ERR_* value on failure.
  */
@@ -177,21 +150,21 @@ int i2c_master_transfer_async(struct i2c_master_dev *dev,
 			      i2c_master_done_cb_t cb, void *ctx);
 
 /**
- * i2c_master_abort() - abort ongoing transfer
+ * i2c_master_abort() - abort the ongoing transfer
  * @dev: I2C master device
  *
  * Context: task context.
  *
- * Aborts any ongoing asynchronous transfer. After this function returns, no
- * further transfer callback will be invoked for this device.
+ * Aborts the ongoing transfer and clears its completion callback. After it
+ * returns no transfer callback will be invoked for this device and @msgs and
+ * its buffers may be released. Calling this with no transfer in flight returns
+ * the same value.
  *
- * This is an active abort initiated by the caller. It does not trigger the
- * completion callback, because the caller already knows the operation was
- * cancelled. Passive aborts caused by hardware errors are reported through
- * the completion callback instead, using the I2C_ERR_ERR_ABORTED bit.
+ * It does not trigger the completion callback; a passive abort is reported
+ * through it first, using the I2C_ERR_ERR_ABORTED bit.
  *
- * If a callback is currently executing in an ISR, this function waits for it
- * to return, or the adapter serializes the operation.
+ * If a callback is running in an ISR, this function waits for it to return, or
+ * the adapter serializes the operation.
  *
  * Return: 0 on success, negative I2C_ERR_* value on failure.
  */

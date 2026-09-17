@@ -2,17 +2,8 @@
 /*
  * GPIO subsystem contract.
  *
- * Provides a backend-independent GPIO API for applications and board code.
- * The subsystem layer declares only the contract; all hardware access is
- * performed by the adapter layer.
- *
- * Device model: one gpio_dev instance represents one bound GPIO pin.
- * Thread safety: the adapter serializes concurrent calls on the same
- * gpio_dev.
- * Return values: %0 on success, negative error code on failure.
- *
  * The interrupt trigger mode is fixed by the adapter during board
- * initialization and cannot be changed at runtime.
+ * initialization. The adapter serializes concurrent calls on the same device.
  */
 
 #ifndef SUBSYSTEM_GPIO_H
@@ -24,6 +15,8 @@
  * struct gpio_dev - GPIO pin instance
  * @name: debug name, not interpreted by the subsystem layer
  * @priv: adapter-private data, not interpreted by the subsystem layer
+ *
+ * One instance represents one bound GPIO pin.
  */
 struct gpio_dev {
 	const char *name;
@@ -35,14 +28,14 @@ struct gpio_dev {
  * @dev: GPIO device that triggered the interrupt
  * @ctx: user context passed to gpio_irq_enable()
  *
- * Context: interrupt context (executed directly inside the ISR).
+ * Context: interrupt context.
  *
- * The callback must not block, sleep, wait, allocate memory, or call any
- * subsystem API. Execution time must be bounded.
+ * Invoked for every interrupt until gpio_irq_disable() clears the
+ * subscription. @ctx must stay valid until that disable returns.
  *
- * The callback may run concurrently with task-context operations on the same
- * device. The adapter must guarantee API atomicity, or the callback must be
- * restricted to setting a flag without touching the device.
+ * Must not block, sleep, wait, allocate, or call any subsystem API; execution
+ * time must be bounded. May run concurrently with task context on the same
+ * device.
  */
 typedef void (*gpio_irq_cb_t)(struct gpio_dev *dev, void *ctx);
 
@@ -88,23 +81,31 @@ int gpio_toggle(struct gpio_dev *dev);
 int gpio_read(struct gpio_dev *dev, uint8_t *value);
 
 /**
- * gpio_irq_enable() - enable the pin interrupt
+ * gpio_irq_enable() - enable the pin interrupt and register the callback
  * @dev: GPIO device
- * @cb: interrupt callback, see typedef gpio_irq_cb_t for its restrictions
+ * @cb: interrupt callback, must not be NULL
  * @ctx: user context passed to @cb
  *
- * Context: task context. Callback registration is not atomic with respect to
- * a pending interrupt.
+ * Context: task context. Registration is not atomic with respect to a pending
+ * interrupt.
+ *
+ * Registers @cb once; it stays registered until gpio_irq_disable(). Enabling
+ * an already enabled interrupt is a contract breach, and gpio_irq_disable()
+ * followed by a new gpio_irq_enable() is the only way to replace @cb or @ctx.
  *
  * Return: %0 on success, negative error code on failure.
  */
 int gpio_irq_enable(struct gpio_dev *dev, gpio_irq_cb_t cb, void *ctx);
 
 /**
- * gpio_irq_disable() - disable the pin interrupt
+ * gpio_irq_disable() - disable the pin interrupt and clear the callback
  * @dev: GPIO device
  *
  * Context: task context.
+ *
+ * After it returns no further callback will be invoked for this device and
+ * @ctx may be released. Disabling an already disabled interrupt returns the
+ * same value.
  *
  * Return: %0 on success, negative error code on failure.
  */

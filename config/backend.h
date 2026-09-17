@@ -5,9 +5,10 @@
 /*
  * Backend selection.
  *
- * Select exactly one backend per subsystem and keep the others commented out.
- * The selected backend must match the one hard-wired in the board file,
- * otherwise the mismatch shows up as undefined symbols at link time.
+ * Select exactly one backend per subsystem or hardware-backed tool and keep
+ * the others commented out. The selected backend must match the one hard-wired
+ * in the board file, otherwise the mismatch shows up as undefined symbols at
+ * link time.
  */
 
 /* UART */
@@ -19,5 +20,15 @@
 
 /* #define SPI_BACKEND_STM32_HAL */
 #define SPI_BACKEND_HOST_MOCK
+
+/* CAN */
+
+/* #define CAN_BACKEND_STM32_HAL */
+#define CAN_BACKEND_HOST_MOCK
+
+/* TIME (hardware-backed tools) */
+
+/* #define TIME_BACKEND_STM32_HAL */
+#define TIME_BACKEND_HOST_MOCK
 
 #endif /* CONFIG_BACKEND_H */

@@ -1,10 +1,6 @@
 /* SPDX-License-Identifier: MIT */
 /*
  * spi_master subsystem contract.
- *
- * Provides a backend-independent SPI master API for applications and board
- * code. The subsystem layer declares only the contract; all hardware access
- * is performed by the adapter layer.
  */
 
 #ifndef SUBSYSTEM_SPI_MASTER_H
@@ -14,13 +10,9 @@
 #include <stdint.h>
 
 /*
- * Error codes for functions returning int.
- *
- *   >= 0  success: number of bytes transferred, or 0 for control APIs
- *   < 0   failure: one of the spi_master_ERR_* values below
- *
- * These values are not used as bitmask flags. Per-transfer errors are
- * reported separately through spi_master_ERR_* bits below.
+ * Return values: >= 0 is the number of bytes transferred, or 0 for control
+ * APIs; < 0 is one of the SPI_MASTER_ERR_* values below. These are not bitmask
+ * flags.
  */
 #define SPI_MASTER_OK 0
 #define SPI_MASTER_ERR_PARAM (-1)
@@ -30,16 +22,11 @@
 #define SPI_MASTER_ERR_UNSUPPORTED (-5)
 
 /*
- * Error bits reported in the @errors argument of spi_master_done_cb_t.
+ * Error bits for the @errors argument of spi_master_done_cb_t; a transfer may
+ * report several of them at once.
  *
- * These are bitmask flags, not return values. A single transfer may report
- * multiple error bits at the same time. Callers that do not distinguish
- * between error types may simply test @errors != 0.
- *
- * SPI_MASTER_ERR_OVERRUN:    receive data was lost because the adapter or
- *                            hardware could not consume it in time
- * SPI_MASTER_ERR_MODE_FAULT: SPI mode fault, typically caused by a slave
- *                            driving the chip select when not selected
+ * SPI_MASTER_ERR_OVERRUN:    receive data was lost before it could be consumed
+ * SPI_MASTER_ERR_MODE_FAULT: SPI mode fault
  * SPI_MASTER_ERR_ABORTED:    transfer was terminated by hardware error or by
  *                            spi_master_abort()
  */
@@ -76,9 +63,8 @@ typedef enum {
  * @name: debug name, not interpreted by the subsystem layer
  * @priv: adapter-private data, not interpreted by the subsystem layer
  *
- * One instance represents one bound SPI slave device. Instances are created
- * by board code and exported to applications. Multiple instances may share
- * the same physical SPI controller; the adapter serializes access at the bus
+ * One instance represents one bound SPI slave device. Multiple instances may
+ * share one physical controller; the adapter serializes access at the bus
  * level.
  */
 struct spi_master_dev {
@@ -92,14 +78,13 @@ struct spi_master_dev {
  * @active: non-zero to assert chip select, zero to deassert
  *
  * Provided by board code and invoked by the adapter before and after a
- * transfer. The adapter does not interpret @cs_ctx, and does not insert any
- * delay between the chip select change and the transfer.
+ * transfer; the adapter inserts no delay of its own. Setup and hold timing is
+ * the responsibility of the callback: wait for the required time before
+ * returning, both when asserting (@active non-zero) and when deasserting
+ * (@active zero).
  *
- * Chip select setup and hold timing is the responsibility of this callback:
- * when @active is non-zero, the callback should assert the chip select and
- * wait for the required setup time before returning; when @active is zero, it
- * should wait for the required hold time before deasserting the chip select.
- * If hardware chip select is used, this callback may be NULL.
+ * Fixed at binding time, not a runtime registration. May be NULL when hardware
+ * chip select is used.
  */
 typedef void (*spi_master_cs_ctrl_t)(void *cs_ctx, int active);
 
@@ -112,9 +97,7 @@ typedef void (*spi_master_cs_ctrl_t)(void *cs_ctx, int active);
  * @cs_ctrl: chip select control callback, may be NULL for hardware CS
  * @cs_ctx: context passed to @cs_ctrl
  *
- * Describes the line parameters of a slave device. The board provides one of
- * these when it binds the device. Runtime reconfiguration is not provided by
- * the subsystem layer; it is done through board-level re-binding.
+ * Fixed by board code at binding time; not reconfigurable at runtime.
  */
 struct spi_master_master_config {
 	uint32_t clock_hz;
@@ -126,20 +109,21 @@ struct spi_master_master_config {
 };
 
 /**
- * typedef spi_master_done_cb_t - asynchronous transfer completion callback
+ * typedef spi_master_done_cb_t - transfer completion callback
  * @dev: SPI master device that completed the transfer
- * @len: number of bytes transferred, always non-negative
- * @errors: error bitmask, 0 if no error occurred, see spi_master_ERR_*
+ * @len: number of bytes transferred
+ * @errors: error bitmask, 0 when clean, see SPI_MASTER_ERR_*
  * @ctx: user context passed to spi_master_transfer_async()
  *
- * Context: interrupt context (executed directly inside the ISR).
+ * Context: interrupt context.
  *
- * The callback must not block, sleep, wait, allocate memory, or call any
- * subsystem API. Execution time must be bounded.
+ * Invoked once per spi_master_transfer_async() call, after which the buffers
+ * may be released. @ctx must stay valid until the callback or
+ * spi_master_abort() returns.
  *
- * The callback may run concurrently with task-context operations on the same
- * device. The adapter must guarantee API atomicity, or the callback must be
- * restricted to setting a flag without touching the device.
+ * Must not block, sleep, wait, allocate, or call any subsystem API; execution
+ * time must be bounded. May run concurrently with task context on the same
+ * device.
  */
 typedef void (*spi_master_done_cb_t)(struct spi_master_dev *dev, size_t len,
 				     uint32_t errors, void *ctx);
@@ -154,14 +138,9 @@ typedef void (*spi_master_done_cb_t)(struct spi_master_dev *dev, size_t len,
  *
  * Context: task context.
  *
- * Performs a full-duplex transfer of @len bytes. If both @tx_buf and @rx_buf
- * are non-NULL, data is transmitted and received simultaneously. The chip
- * select is asserted and deasserted by the adapter using the callback
- * provided in the configuration.
- *
- * Transmission and reception are not independent channels; they are part of
- * the same transfer. Concurrent calls on the same device are serialized by
- * the adapter or rejected with spi_master_ERR_BUSY.
+ * Full-duplex transfer of @len bytes. The chip select is driven through the
+ * configured @cs_ctrl callback. Concurrent calls on the same device are
+ * serialized by the adapter or rejected with SPI_MASTER_ERR_BUSY.
  *
  * Return: number of bytes transferred on success, negative
  * SPI_MASTER_ERR_* value on failure.
@@ -175,16 +154,14 @@ int spi_master_transfer(struct spi_master_dev *dev, const void *tx_buf,
  * @tx_buf: buffer to transmit, may be NULL to receive only
  * @rx_buf: buffer to receive into, may be NULL to transmit only
  * @len: number of bytes to transfer
- * @cb: completion callback
+ * @cb: completion callback, must not be NULL, invoked exactly once
  * @ctx: user context passed to @cb
  *
  * Context: task context.
  *
- * Starts a full-duplex transfer of @len bytes. The buffers must remain valid
- * until @cb is invoked. Once started, the transfer has only two outcomes:
- * completion or failure, both reported through @cb. There is no separate
- * timeout parameter; if the caller needs to cancel the transfer, it calls
- * spi_master_abort().
+ * @cb reports completion or failure; there is no timeout parameter, cancel the
+ * transfer with spi_master_abort(). The buffers must remain valid until @cb is
+ * invoked, and may be released when @cb or spi_master_abort() returns.
  *
  * Return: 0 on success, negative SPI_MASTER_ERR_* value on failure.
  */
@@ -193,21 +170,22 @@ int spi_master_transfer_async(struct spi_master_dev *dev, const void *tx_buf,
 			      void *ctx);
 
 /**
- * spi_master_abort() - abort ongoing transfer
+ * spi_master_abort() - abort the ongoing transfer
  * @dev: SPI master device
  *
  * Context: task context.
  *
- * Aborts any ongoing asynchronous transfer. After this function returns, no
- * further transfer callback will be invoked for this device.
+ * Aborts the ongoing transfer and clears its completion callback. After it
+ * returns no transfer callback will be invoked for this device and the buffers
+ * may be released. Calling this with no transfer in flight returns the same
+ * value.
  *
- * This is an active abort initiated by the caller. It does not trigger the
- * completion callback, because the caller already knows the operation was
- * cancelled. Passive aborts caused by hardware errors are reported through
- * the completion callback instead, using the SPI_MASTER_ERR_ABORTED bit.
+ * It does not trigger the completion callback; a passive abort is reported
+ * through it first, using the SPI_MASTER_ERR_ABORTED bit. The @cs_ctrl hook is
+ * not affected.
  *
- * If a callback is currently executing in an ISR, this function waits for it
- * to return, or the adapter serializes the operation.
+ * If a callback is running in an ISR, this function waits for it to return, or
+ * the adapter serializes the operation.
  *
  * Return: 0 on success, negative SPI_MASTER_ERR_* value on failure.
  */

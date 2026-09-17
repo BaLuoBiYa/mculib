@@ -1,14 +1,6 @@
 /* SPDX-License-Identifier: MIT */
 /*
  * timer subsystem contract.
- *
- * Provides a backend-independent timer API for applications and board code.
- * The subsystem layer declares only the contract; all hardware access is
- * performed by the adapter layer.
- *
- * A timer instance is a periodic or one-shot event source. Period, prescaler,
- * and one-shot/periodic mode are fixed by board code at binding time and are
- * not changed at runtime.
  */
 
 #ifndef SUBSYSTEM_TIMER_H
@@ -27,8 +19,8 @@
  * @name: debug name, not interpreted by the subsystem layer
  * @priv: adapter-private data, not interpreted by the subsystem layer
  *
- * One instance represents one bound timer. Instances are created by board
- * code and exported to applications.
+ * One instance represents one bound timer, a periodic or one-shot event
+ * source.
  */
 struct timer_dev {
 	const char *name;
@@ -40,10 +32,7 @@ struct timer_dev {
  * @period_us: timer period in microseconds
  * @one_shot: non-zero for one-shot mode, zero for periodic mode
  *
- * Describes the timing parameters of a timer instance. The board provides
- * one of these when it binds the device. Runtime reconfiguration is not
- * provided by the subsystem layer; it is done through board-level
- * re-binding.
+ * Fixed by board code at binding time; not reconfigurable at runtime.
  */
 struct timer_config {
 	uint32_t period_us;
@@ -55,43 +44,46 @@ struct timer_config {
  * @dev: timer device that expired
  * @ctx: user context passed to timer_start()
  *
- * Context: interrupt context (executed directly inside the ISR).
+ * Context: interrupt context.
  *
- * The callback must not block, sleep, wait, allocate memory, or call any
- * subsystem API. Execution time must be bounded.
+ * Invoked on every period in periodic mode, once per run in one-shot mode.
+ * @ctx must stay valid until timer_stop() returns.
  *
- * The callback may run concurrently with task-context operations on the same
- * device. The adapter must guarantee API atomicity, or the callback must be
- * restricted to setting a flag without touching the device.
+ * Must not block, sleep, wait, allocate, or call any subsystem API; execution
+ * time must be bounded. May run concurrently with task context on the same
+ * device.
  */
 typedef void (*timer_cb_t)(struct timer_dev *dev, void *ctx);
 
 /**
  * timer_start() - start the timer and register the expiration callback
  * @dev: timer device
- * @cb: expiration callback
+ * @cb: expiration callback, must not be NULL
  * @ctx: user context passed to @cb
  *
  * Context: task context.
  *
- * Starts the timer. In periodic mode, @cb is invoked on every period. In
- * one-shot mode, @cb is invoked once and the timer stops.
+ * Registers @cb until timer_stop() clears it. In one-shot mode the counter
+ * stops after the callback; the registration does not.
  *
- * The callback is registered by this call. Calling timer_start() on an
- * already running timer is a contract breach.
+ * Calling this while the timer is running is a contract breach, and so is
+ * replacing @cb or @ctx while it runs. With the counter stopped - after
+ * timer_stop() or after a one-shot completion - this call re-registers and is
+ * how the timer is armed again.
  *
  * Return: TIMER_OK on success, negative error code on failure.
  */
 int timer_start(struct timer_dev *dev, timer_cb_t cb, void *ctx);
 
 /**
- * timer_stop() - stop the timer and unregister the callback
+ * timer_stop() - stop the timer and clear the registration
  * @dev: timer device
  *
  * Context: task context.
  *
- * Stops the timer. After this function returns, no further callback will be
- * invoked for this device.
+ * After it returns no further callback will be invoked for this device and
+ * @ctx may be released. Stopping an already stopped timer returns the same
+ * value.
  *
  * Return: TIMER_OK on success, negative error code on failure.
  */
@@ -100,13 +92,10 @@ int timer_stop(struct timer_dev *dev);
 /**
  * timer_get_count() - read the current counter value
  * @dev: timer device
- * @count: output for the current counter value
+ * @count: output for the current counter value, in the timer's native counting
+ *         unit
  *
  * Context: task or interrupt context.
- *
- * Reads the current counter value. The unit is the timer's native counting
- * unit, determined by the prescaler fixed at binding time. Useful for
- * measuring elapsed time within a period.
  *
  * Return: TIMER_OK on success, negative error code on failure.
  */

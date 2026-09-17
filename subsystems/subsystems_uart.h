@@ -1,10 +1,6 @@
 /* SPDX-License-Identifier: MIT */
 /*
  * UART subsystem contract.
- *
- * Provides a backend-independent UART API for applications and board code.
- * The subsystem layer declares only the contract; all hardware access is
- * performed by the adapter layer.
  */
 
 #ifndef SUBSYSTEM_UART_H
@@ -14,13 +10,9 @@
 #include <stdint.h>
 
 /*
- * Error codes for functions returning int.
- *
- *   >= 0  success: number of bytes transferred, or 0 for control APIs
- *   < 0   failure: one of the UART_ERR_* values below
- *
- * These values are not used as bitmask flags. Per-frame receive errors are
- * reported separately through UART_RX_ERR_* below.
+ * Return values: >= 0 is the number of bytes transferred, or 0 for control
+ * APIs; < 0 is one of the UART_ERR_* values below. These are not bitmask
+ * flags.
  */
 #define UART_OK 0
 #define UART_ERR_PARAM (-1)
@@ -30,17 +22,12 @@
 #define UART_ERR_UNSUPPORTED (-5)
 
 /*
- * Error bits reported in the @errors argument of uart_rx_cb_t.
+ * Error bits for the @errors argument of uart_rx_cb_t; a frame may report
+ * several of them at once.
  *
- * These are bitmask flags, not return values. A single frame may report
- * multiple error bits at the same time. Callers that do not distinguish
- * between error types may simply test @errors != 0.
- *
- * UART_RX_ERR_OVERRUN: receive data was lost because the adapter or hardware
- *                      could not consume it in time
+ * UART_RX_ERR_OVERRUN: receive data was lost before it could be consumed
  * UART_RX_ERR_PARITY:  parity check failed
- * UART_RX_ERR_FRAMING: framing error, typically caused by baud rate mismatch
- *                      or line noise
+ * UART_RX_ERR_FRAMING: framing error
  * UART_RX_ERR_ABORTED: reception was terminated by hardware error or by
  *                      uart_abort()
  */
@@ -66,8 +53,7 @@ typedef enum {
  * @name: debug name, not interpreted by the subsystem layer
  * @priv: adapter-private data, not interpreted by the subsystem layer
  *
- * One instance represents one bound UART port. Instances are created by
- * board code and exported to applications.
+ * One instance represents one bound UART port.
  */
 struct uart_dev {
 	const char *name;
@@ -81,9 +67,7 @@ struct uart_dev {
  * @stopbits: number of stop bits, typically 1 or 2
  * @parity: parity mode, see enum uart_parity_t
  *
- * Describes the line parameters of a device. The board provides one of these
- * when it binds the device. Runtime reconfiguration is not provided by the
- * subsystem layer; it is done through board-level re-binding.
+ * Fixed by board code at binding time; not reconfigurable at runtime.
  */
 struct uart_config {
 	uint32_t baudrate;
@@ -93,38 +77,41 @@ struct uart_config {
 };
 
 /**
- * typedef uart_rx_cb_t - asynchronous receive completion callback
- * @dev: UART device that completed the reception
- * @len: number of bytes received, always non-negative
- * @errors: error bitmask, 0 if no error occurred, see UART_RX_ERR_*
+ * typedef uart_rx_cb_t - receive callback
+ * @dev: UART device that received the frame
+ * @len: number of bytes received
+ * @errors: error bitmask, 0 when the frame is clean, see UART_RX_ERR_*
  * @ctx: user context passed to uart_recv_async()
  *
- * Context: interrupt context (executed directly inside the ISR).
+ * Context: interrupt context.
  *
- * The callback must not block, sleep, wait, allocate memory, or call any
- * subsystem API. Execution time must be bounded.
+ * Invoked for every frame until uart_abort() clears the subscription. The
+ * registered buffer may be reused by the adapter as soon as the callback
+ * returns, so data that has to be kept must be copied out here. @ctx must stay
+ * valid until uart_abort() returns.
  *
- * The callback may run concurrently with task-context operations on the same
- * device. The adapter must guarantee API atomicity, or the callback must be
- * restricted to setting a flag without touching the device.
+ * Must not block, sleep, wait, allocate, or call any subsystem API; execution
+ * time must be bounded. May run concurrently with task context on the same
+ * device.
  */
 typedef void (*uart_rx_cb_t)(struct uart_dev *dev, size_t len, uint32_t errors,
 			     void *ctx);
 
 /**
- * typedef uart_tx_done_cb_t - asynchronous transmit completion callback
+ * typedef uart_tx_done_cb_t - transmit completion callback
  * @dev: UART device that completed the transmission
  * @result: 0 on completion, negative UART_ERR_* value on failure
  * @ctx: user context passed to uart_send_async()
  *
- * Context: interrupt context (executed directly inside the ISR).
+ * Context: interrupt context.
  *
- * The callback must not block, sleep, wait, allocate memory, or call any
- * subsystem API. Execution time must be bounded.
+ * Invoked once per uart_send_async() call, after which the transmit buffer may
+ * be released. @ctx must stay valid until the callback or uart_abort()
+ * returns.
  *
- * The callback may run concurrently with task-context operations on the same
- * device. The adapter must guarantee API atomicity, or the callback must be
- * restricted to setting a flag without touching the device.
+ * Must not block, sleep, wait, allocate, or call any subsystem API; execution
+ * time must be bounded. May run concurrently with task context on the same
+ * device.
  */
 typedef void (*uart_tx_done_cb_t)(struct uart_dev *dev, int result, void *ctx);
 
@@ -162,15 +149,14 @@ int uart_recv(struct uart_dev *dev, void *buf, size_t len, uint32_t timeout);
  * @dev: UART device
  * @buf: buffer to transmit, must remain valid until @cb is invoked
  * @len: number of bytes to transmit
- * @cb: completion callback
+ * @cb: completion callback, must not be NULL, invoked exactly once
  * @ctx: user context passed to @cb
  *
  * Context: task context.
  *
- * The buffer must remain valid until the completion callback is invoked.
- * Once started, transmission has only two outcomes: completion or failure,
- * both reported through @cb. There is no separate timeout parameter; if the
- * caller needs to cancel the transmission, it calls uart_abort().
+ * @cb reports completion or failure; there is no timeout parameter, cancel the
+ * transmission with uart_abort(). @buf may be released when @cb returns, or
+ * when uart_abort() returns.
  *
  * Return: 0 on success, negative UART_ERR_* value on failure.
  */
@@ -178,30 +164,29 @@ int uart_send_async(struct uart_dev *dev, const void *buf, size_t len,
 		    uart_tx_done_cb_t cb, void *ctx);
 
 /**
- * uart_recv_async() - asynchronously receive one frame
+ * uart_recv_async() - register the receive subscription
  * @dev: UART device
- * @buf: buffer to receive into, must remain valid until @cb is invoked
- * @max_len: buffer capacity, not expected frame length
- * @cb: frame completion callback
+ * @buf: receive buffer, used for every frame of the subscription
+ * @max_len: buffer capacity in bytes
+ * @cb: frame callback, must not be NULL
  * @ctx: user context passed to @cb
  *
  * Context: task context.
  *
- * The frame boundary is determined by the hardware idle interrupt. When the
- * bus goes idle, the adapter invokes @cb with the actual number of bytes
- * received and an error bitmask.
+ * Registers @cb once; it is invoked for every frame until uart_abort() clears
+ * the subscription. The frame boundary is the hardware idle interrupt. A frame
+ * longer than @max_len is truncated to @max_len and reported with
+ * UART_RX_ERR_OVERRUN. Reception and transmission are independent and may
+ * proceed concurrently.
  *
- * @max_len is the buffer capacity, not the expected frame length. Reception
- * stops after the callback, and @buf is returned to the caller. The caller
- * must invoke uart_recv_async() again to receive the next frame.
+ * @buf must not be released, reused, or written while the subscription is
+ * registered. One subscription per device is supported; registering while a
+ * subscription is active is a contract breach, and uart_abort() followed by a
+ * new registration is the only way to replace @cb or @ctx. uart_recv() must not
+ * be used while a subscription is registered.
  *
- * If the bus never goes idle, the callback is never invoked. The caller is
- * responsible for implementing timeout protection, for example by using a
- * timer to call uart_abort().
- *
- * Transmission and reception are independent channels and may proceed
- * concurrently. Concurrent calls in the same direction are serialized by the
- * adapter or rejected with UART_ERR_BUSY.
+ * If the bus never goes idle, no callback is invoked and the caller provides
+ * timeout protection.
  *
  * Return: 0 on success, negative UART_ERR_* value on failure.
  */
@@ -209,23 +194,24 @@ int uart_recv_async(struct uart_dev *dev, void *buf, size_t max_len,
 		    uart_rx_cb_t cb, void *ctx);
 
 /**
- * uart_abort() - abort ongoing transmit and receive
+ * uart_abort() - stop the device and clear every callback
  * @dev: UART device
  *
  * Context: task context.
  *
- * Aborts any ongoing asynchronous transmit or receive operation. After this
- * function returns, no further transmit or receive callback will be invoked
- * for this device.
+ * Aborts the ongoing transmit and receive operations and clears the receive
+ * subscription. After it returns no callback will be invoked for this device
+ * and every buffer handed to it may be released. The device must be registered
+ * again before it is used; calling this with nothing registered returns the
+ * same value.
  *
- * This is an active abort initiated by the caller. It does not trigger the
- * completion callback, because the caller already knows the operation was
- * cancelled. Passive aborts caused by hardware errors are reported through
- * the completion callbacks instead: transmit uses @result with a negative
- * UART_ERR_* value, receive uses the UART_RX_ERR_ABORTED bit.
+ * It does not trigger the completion callbacks. Passive aborts are reported
+ * through them first - a negative @result for transmit, the
+ * UART_RX_ERR_ABORTED bit for receive - and also clear the receive
+ * subscription.
  *
- * If a callback is currently executing in an ISR, this function waits for it
- * to return, or the adapter serializes the operation.
+ * If a callback is running in an ISR, this function waits for it to return, or
+ * the adapter serializes the operation.
  *
  * Return: 0 on success, negative UART_ERR_* value on failure.
  */

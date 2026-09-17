@@ -2,16 +2,8 @@
 /*
  * pwm subsystem contract.
  *
- * Provides a backend-independent PWM API for applications and board code.
- * The subsystem layer declares only the contract; all hardware access is
- * performed by the adapter layer.
- *
- * A PWM instance is a single output channel. Frequency, period, polarity, and
- * idle level are fixed by board code at binding time and are not changed at
- * runtime. Only the duty cycle is changed at runtime.
- *
- * Multiple channels driven by the same timer are represented by multiple
- * pwm_dev instances. The adapter serializes access at the timer level.
+ * Multiple channels driven by the same timer are separate instances; the
+ * adapter serializes access at the timer level.
  */
 
 #ifndef SUBSYSTEM_PWM_H
@@ -20,7 +12,7 @@
 #include <stdint.h>
 
 /*
- * Error codes for functions returning int.
+ * Return values: PWM_OK on success, negative error code on failure.
  */
 #define PWM_OK 0
 #define PWM_ERR (-1)
@@ -30,8 +22,7 @@
  * @name: debug name, not interpreted by the subsystem layer
  * @priv: adapter-private data, not interpreted by the subsystem layer
  *
- * One instance represents one bound PWM output channel. Instances are created
- * by board code and exported to applications.
+ * One instance represents one bound PWM output channel.
  */
 struct pwm_dev {
 	const char *name;
@@ -39,20 +30,22 @@ struct pwm_dev {
 };
 
 /**
- * struct pwm_config - PWM configuration
- * @frequency_hz: PWM frequency in Hz
- * @polarity: output polarity
- * @idle_duty: duty value driven when the channel is stopped
- *
- * Describes the waveform parameters of a PWM instance. The board provides
- * one of these when it binds the device. Runtime reconfiguration is not
- * provided by the subsystem layer.
+ * enum pwm_polarity_t - PWM output polarity
  */
 typedef enum {
 	PWM_POLARITY_NORMAL = 0,
 	PWM_POLARITY_INVERTED,
 } pwm_polarity_t;
 
+/**
+ * struct pwm_config - PWM configuration
+ * @frequency_hz: PWM frequency in Hz
+ * @polarity: output polarity, see enum pwm_polarity_t
+ * @idle_duty: duty value driven when the channel is stopped
+ *
+ * Fixed by board code at binding time; the duty cycle is the only runtime
+ * setting.
+ */
 struct pwm_config {
 	uint32_t frequency_hz;
 	pwm_polarity_t polarity;
@@ -65,8 +58,8 @@ struct pwm_config {
  *
  * Context: task context.
  *
- * Enables the PWM output. The output starts from the current duty cycle,
- * which is zero until pwm_set_duty() is called.
+ * Starts the output from the current duty cycle, which is zero until
+ * pwm_set_duty() is called.
  *
  * Return: PWM_OK on success, negative error code on failure.
  */
@@ -78,8 +71,8 @@ int pwm_start(struct pwm_dev *dev);
  *
  * Context: task context.
  *
- * Disables the PWM output. The channel is driven to its configured idle
- * level, determined at binding time.
+ * Stops the output; the channel is driven to its idle level, fixed at binding
+ * time.
  *
  * Return: PWM_OK on success, negative error code on failure.
  */
@@ -88,17 +81,12 @@ int pwm_stop(struct pwm_dev *dev);
 /**
  * pwm_set_duty() - set the duty cycle
  * @dev: PWM device
- * @duty: duty cycle in native counter units
+ * @duty: duty cycle in native counter units, not a percentage
  *
  * Context: task or interrupt context.
  *
- * Sets the duty cycle. @duty is expressed in the same counting unit as the
- * timer's period, not as a percentage. The valid range is 0 to the period
- * value fixed at binding time, inclusive. Passing a value outside this range
- * is a contract breach.
- *
- * This function is intended for hot paths. The adapter writes the compare
- * register directly, without locks unless the backend requires them.
+ * The valid range is 0 to the period value fixed at binding time, inclusive;
+ * a value outside it is a contract breach.
  *
  * Return: PWM_OK on success, negative error code on failure.
  */

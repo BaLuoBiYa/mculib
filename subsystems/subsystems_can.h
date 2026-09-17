@@ -1,14 +1,6 @@
 /* SPDX-License-Identifier: MIT */
 /*
- * can subsystem contract.
- *
- * Provides a backend-independent CAN API for applications and board code.
- * The subsystem layer declares only the contract; all hardware access is
- * performed by the adapter layer.
- *
- * A CAN instance represents one bound CAN controller. Bit timing and
- * controller mode are fixed by board code at binding time and are not
- * changed at runtime. Acceptance filters may be set after binding.
+ * CAN subsystem contract.
  */
 
 #ifndef SUBSYSTEM_CAN_H
@@ -18,17 +10,11 @@
 #include <stdint.h>
 
 /*
- * Error codes for functions returning int.
- *
- *   >= 0  success: number of frames transferred, or 0 for control APIs
- *   < 0   failure: one of the CAN_ERR_* values below
- *
- * These values express operation-level results only: whether the call was
- * accepted, completed, or timed out. They do not describe frame-level errors
- * on the bus. Frame-level errors are reported through the CAN_EVT_ERR_* bit
- * mask in callbacks.
- *
- * CAN_ERR_TIMEOUT is returned only by synchronous APIs.
+ * Return values: >= 0 is the number of frames transferred, or 0 for control
+ * APIs; < 0 is one of the CAN_ERR_* values below, which describe the operation
+ * only and never frame-level bus errors. Those are reported through the
+ * CAN_EVT_ERR_* bits in callbacks. CAN_ERR_TIMEOUT is returned by synchronous
+ * APIs only.
  */
 #define CAN_OK 0
 #define CAN_ERR_PARAM (-1)
@@ -37,21 +23,17 @@
 #define CAN_ERR_UNSUPPORTED (-4)
 
 /*
- * Event error bits reported in the @errors argument of callbacks.
+ * Event error bits for the @errors argument of callbacks, used for both
+ * transmit and receive; a frame may report several of them at once.
  *
- * These are bitmask flags, not return values. A single frame may report
- * multiple error bits at the same time. They are used for both transmit and
- * receive events. Callers that do not distinguish between error types may
- * simply test @errors != 0.
- *
- * CAN_EVT_ERR_BIT:         bit error detected on the bus
- * CAN_EVT_ERR_FORM:        form error detected on the bus
+ * CAN_EVT_ERR_BIT:         bit error on the bus
+ * CAN_EVT_ERR_FORM:        form error on the bus
  * CAN_EVT_ERR_ACK:         acknowledgement error
  * CAN_EVT_ERR_CRC:         CRC error
  * CAN_EVT_ERR_STUFF:       bit stuffing error
- * CAN_EVT_ERR_ARBITRATION: arbitration was lost
- * CAN_EVT_ERR_BUS_OFF:     controller entered bus-off state
- * CAN_EVT_ERR_ABORTED:     operation was terminated by can_abort()
+ * CAN_EVT_ERR_ARBITRATION: arbitration lost
+ * CAN_EVT_ERR_BUS_OFF:     controller entered bus-off
+ * CAN_EVT_ERR_ABORTED:     operation terminated by can_abort()
  */
 #define CAN_EVT_ERR_BIT (1u << 0)
 #define CAN_EVT_ERR_FORM (1u << 1)
@@ -83,8 +65,7 @@
  * @name: debug name, not interpreted by the subsystem layer
  * @priv: adapter-private data, not interpreted by the subsystem layer
  *
- * One instance represents one bound CAN controller. Instances are created by
- * board code and exported to applications.
+ * One instance represents one bound CAN controller.
  */
 struct can_dev {
 	const char *name;
@@ -97,19 +78,15 @@ struct can_dev {
  * @dlc: data length code, 0 to 8 for classic CAN
  * @data: frame payload
  *
- * The caller assembles @id by combining the frame identifier with the
- * appropriate flags:
+ * @id is assembled by the caller:
  *
- *   - standard frame:  @id = identifier & CAN_SFF_MASK
- *   - extended frame:  @id = CAN_EFF_FLAG | (identifier & CAN_EFF_MASK)
- *   - remote frame:    @id |= CAN_RTR_FLAG
+ *   standard frame:  identifier & CAN_SFF_MASK
+ *   extended frame:  CAN_EFF_FLAG | (identifier & CAN_EFF_MASK)
+ *   remote frame:    the above, plus CAN_RTR_FLAG
  *
- * The adapter extracts the flags and identifier and maps them to hardware
- * registers. CAN_ERR_FLAG is set by the adapter on received error frames and
- * must not be set by the caller when transmitting.
- *
- * For a remote frame, CAN_RTR_FLAG is set and @dlc indicates the requested
- * length; @data is not transmitted.
+ * CAN_ERR_FLAG is set by the adapter on received error frames and must not be
+ * set when transmitting. For a remote frame @dlc is the requested length and
+ * @data is not transmitted.
  */
 struct can_msg {
 	uint32_t id;
@@ -122,10 +99,7 @@ struct can_msg {
  * @id: identifier to match, with CAN_*_FLAG bits
  * @mask: bit mask, 1 means compare, 0 means don't care
  *
- * A frame is accepted if (frame_id & mask) == (filter_id & mask). Both
- * standard and extended frames can be filtered. The board or application
- * provides an array of filters; the adapter programs them into hardware
- * acceptance filters.
+ * A frame is accepted if (frame_id & mask) == (filter_id & mask).
  */
 struct can_filter {
 	uint32_t id;
@@ -139,10 +113,7 @@ struct can_filter {
  * @loopback: non-zero to enable loopback mode
  * @listen_only: non-zero to enable listen-only mode
  *
- * Describes the physical layer parameters of a CAN controller. The board
- * provides one of these when it binds the device. Runtime reconfiguration is
- * not provided by the subsystem layer; it is done through board-level
- * re-binding.
+ * Fixed by board code at binding time; not reconfigurable at runtime.
  */
 struct can_config {
 	uint32_t bitrate;
@@ -152,47 +123,42 @@ struct can_config {
 };
 
 /**
- * typedef can_rx_cb_t - asynchronous receive callback
+ * typedef can_rx_cb_t - receive callback
  * @dev: CAN device that received the frame
  * @msg: received frame, valid only for the duration of the callback
- * @errors: event error bitmask, 0 if no error occurred, see CAN_EVT_ERR_*
+ * @errors: event error bitmask, 0 when the frame is clean, see CAN_EVT_ERR_*
  * @ctx: user context passed to can_recv_async()
  *
- * Context: interrupt context (executed directly inside the ISR).
+ * Context: interrupt context.
  *
- * @msg is valid only for the duration of the callback. The caller must copy
- * any data it needs to retain.
+ * Invoked for every accepted frame until can_abort() clears the subscription.
+ * Anything to be retained has to be copied out of @msg here. @ctx must stay
+ * valid until can_abort() returns.
  *
- * The callback must not block, sleep, wait, allocate memory, or call any
- * subsystem API. Execution time must be bounded.
- *
- * The callback may run concurrently with task-context operations on the same
- * device. The adapter must guarantee API atomicity, or the callback must be
- * restricted to setting a flag without touching the device.
+ * Must not block, sleep, wait, allocate, or call any subsystem API; execution
+ * time must be bounded. May run concurrently with task context on the same
+ * device.
  */
 typedef void (*can_rx_cb_t)(struct can_dev *dev, const struct can_msg *msg,
 			    uint32_t errors, void *ctx);
 
 /**
- * typedef can_tx_done_cb_t - asynchronous transmit completion callback
+ * typedef can_tx_done_cb_t - transmit completion callback
  * @dev: CAN device that completed the transmission
- * @result: operation-level result, 0 or a negative CAN_ERR_* value
- * @errors: event error bitmask, 0 if no error occurred, see CAN_EVT_ERR_*
+ * @result: 0 or a negative CAN_ERR_* value, the operation-level result
+ * @errors: event error bitmask, 0 when clean, see CAN_EVT_ERR_*
  * @ctx: user context passed to can_send_async()
  *
- * Context: interrupt context (executed directly inside the ISR).
+ * Context: interrupt context.
  *
- * @result expresses whether the operation was accepted and completed.
- * @errors expresses frame-level errors observed on the bus. The two are
- * independent: a transfer may complete with @result == 0 and non-zero
- * @errors, meaning the frame was processed but the bus reported errors.
+ * Invoked once per can_send_async() call, after which @msg may be released.
+ * @result and @errors are independent: a non-zero @result means the operation
+ * failed, a non-zero @errors means the bus reported frame-level errors. @ctx
+ * must stay valid until the callback or can_abort() returns.
  *
- * The callback must not block, sleep, wait, allocate memory, or call any
- * subsystem API. Execution time must be bounded.
- *
- * The callback may run concurrently with task-context operations on the same
- * device. The adapter must guarantee API atomicity, or the callback must be
- * restricted to setting a flag without touching the device.
+ * Must not block, sleep, wait, allocate, or call any subsystem API; execution
+ * time must be bounded. May run concurrently with task context on the same
+ * device.
  */
 typedef void (*can_tx_done_cb_t)(struct can_dev *dev, int result,
 				 uint32_t errors, void *ctx);
@@ -200,18 +166,14 @@ typedef void (*can_tx_done_cb_t)(struct can_dev *dev, int result,
 /**
  * can_set_filter() - set acceptance filters
  * @dev: CAN device
- * @filters: array of filters, may be NULL to accept all frames
+ * @filters: array of filters
  * @num_filters: number of filters in @filters
  *
  * Context: task context.
  *
- * Programs the hardware acceptance filters. A frame is accepted if it
- * matches any of the filters. If @filters is NULL and @num_filters is 0, all
- * frames are accepted.
- *
- * The number of filters a controller supports is backend-specific. If
- * @num_filters exceeds the hardware capacity, the function returns
- * CAN_ERR_UNSUPPORTED.
+ * Can be called after binding. A frame is accepted when it matches any of the
+ * filters; @filters may be NULL with @num_filters 0 to accept all frames.
+ * Exceeding the filter capacity of the backend returns CAN_ERR_UNSUPPORTED.
  *
  * Return: CAN_OK on success, negative CAN_ERR_* value on failure.
  */
@@ -226,13 +188,9 @@ int can_set_filter(struct can_dev *dev, const struct can_filter *filters,
  *
  * Context: task context.
  *
- * Transmits a single frame. If the bus is busy or arbitration is lost, the
- * adapter retries according to the CAN protocol. The function returns when
- * the frame has been acknowledged or the timeout expires.
- *
- * This function returns operation-level results only. Frame-level errors
- * observed on the bus are not reported here; use can_send_async() if the
- * caller needs access to CAN_EVT_ERR_* bits.
+ * Transmits a single frame and returns when it has been acknowledged or the
+ * timeout expires. Only operation-level results are reported; use
+ * can_send_async() to observe the CAN_EVT_ERR_* bits.
  *
  * Return: CAN_OK on success, negative CAN_ERR_* value on failure.
  */
@@ -242,14 +200,13 @@ int can_send(struct can_dev *dev, const struct can_msg *msg, uint32_t timeout);
  * can_send_async() - asynchronously transmit a frame
  * @dev: CAN device
  * @msg: frame to transmit, must remain valid until @cb is invoked
- * @cb: completion callback
+ * @cb: completion callback, must not be NULL, invoked exactly once
  * @ctx: user context passed to @cb
  *
  * Context: task context.
  *
- * Starts an asynchronous transmission. The @msg must remain valid until @cb
- * is invoked. Once started, the transmission has only two outcomes:
- * completion or failure, both reported through @cb.
+ * @cb reports completion or failure. @msg may be released when @cb returns, or
+ * when can_abort() returns.
  *
  * Return: CAN_OK on success, negative CAN_ERR_* value on failure.
  */
@@ -257,38 +214,44 @@ int can_send_async(struct can_dev *dev, const struct can_msg *msg,
 		   can_tx_done_cb_t cb, void *ctx);
 
 /**
- * can_recv_async() - start asynchronous reception
+ * can_recv_async() - register the receive subscription
  * @dev: CAN device
- * @cb: receive callback
+ * @cb: receive callback, must not be NULL
  * @ctx: user context passed to @cb
  *
  * Context: task context.
  *
- * Starts asynchronous reception. For each accepted frame, @cb is invoked with
- * the frame and any event error bits. Reception continues until
- * can_recv_disable() or can_abort() is called.
+ * Registers @cb once; it is invoked for every accepted frame until can_abort()
+ * clears the subscription. A passive abort clears it as well, after delivering
+ * the event that caused it. @ctx must not be released before that.
+ *
+ * One subscription per device is supported; registering while a subscription is
+ * active is a contract breach, and can_abort() followed by a new registration
+ * is the only way to replace @cb or @ctx.
  *
  * Return: CAN_OK on success, negative CAN_ERR_* value on failure.
  */
 int can_recv_async(struct can_dev *dev, can_rx_cb_t cb, void *ctx);
 
 /**
- * can_abort() - abort ongoing transmit and receive
+ * can_abort() - stop the device and clear every callback
  * @dev: CAN device
  *
  * Context: task context.
  *
- * Aborts any ongoing asynchronous transmit or receive operation. After this
- * function returns, no further transmit or receive callback will be invoked
- * for this device.
+ * Aborts the ongoing transmit and receive operations and clears the receive
+ * subscription. After it returns no callback will be invoked for this device
+ * and every buffer handed to it may be released. The device must be registered
+ * again before it is used; calling this with nothing registered returns the
+ * same value.
  *
- * This is an active abort initiated by the caller. It does not trigger the
- * completion callback, because the caller already knows the operation was
- * cancelled. Passive aborts caused by hardware errors are reported through
- * the completion callbacks instead, using the CAN_EVT_ERR_ABORTED bit.
+ * It does not trigger the completion callbacks. Passive aborts are reported
+ * through them first - a negative @result for transmit, the
+ * CAN_EVT_ERR_ABORTED and CAN_EVT_ERR_BUS_OFF bits for the bus state - and also
+ * clear the receive subscription.
  *
- * If a callback is currently executing in an ISR, this function waits for it
- * to return, or the adapter serializes the operation.
+ * If a callback is running in an ISR, this function waits for it to return, or
+ * the adapter serializes the operation.
  *
  * Return: CAN_OK on success, negative CAN_ERR_* value on failure.
  */

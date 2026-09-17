@@ -9,6 +9,12 @@
 
 struct uart_host_priv {
 	FILE *stream;
+	/* Receive subscription, registered once and cleared by uart_abort(). */
+	void *rx_buf;
+	size_t rx_max_len;
+	uart_rx_cb_t rx_cb;
+	void *rx_ctx;
+	int rx_active;
 };
 
 /*
@@ -60,19 +66,52 @@ int uart_recv_async(struct uart_dev *dev, void *buf, size_t max_len,
 		    uart_rx_cb_t cb, void *ctx)
 {
 	struct uart_host_priv *p = dev->priv;
-	size_t n = fread(buf, 1, max_len, p->stream);
 
-	if (n == 0) {
-		return ferror(p->stream) ? UART_ERR_IO : UART_ERR_TIMEOUT;
+	/*
+	 * The contract allows one subscription per device: registering again
+	 * while one is active is a caller breach, and rejecting it here keeps
+	 * the mistake visible instead of silently replacing the subscription.
+	 */
+	if (p->rx_active) {
+		return UART_ERR_BUSY;
 	}
 
-	cb(dev, n, 0, ctx);
+	p->rx_buf = buf;
+	p->rx_max_len = max_len;
+	p->rx_cb = cb;
+	p->rx_ctx = ctx;
+	p->rx_active = 1;
+
+	/*
+	 * A stdio stream is finite, so one call replays its frames and returns,
+	 * with the subscription left registered. A real backend returns
+	 * immediately and fires the callback from the idle interrupt for every
+	 * later frame. Host streams carry no line errors, every frame is
+	 * reported clean.
+	 */
+	for (;;) {
+		size_t n = fread(p->rx_buf, 1, p->rx_max_len, p->stream);
+
+		if (n == 0) {
+			break;
+		}
+
+		p->rx_cb(dev, n, 0, p->rx_ctx);
+	}
+
 	return UART_OK;
 }
 
 int uart_abort(struct uart_dev *dev)
 {
-	(void)dev;
+	struct uart_host_priv *p = dev->priv;
+
+	/* Clear the subscription: no later interrupt may reach rx_cb. */
+	p->rx_buf = NULL;
+	p->rx_max_len = 0;
+	p->rx_cb = NULL;
+	p->rx_ctx = NULL;
+	p->rx_active = 0;
 
 	return UART_OK;
 }
