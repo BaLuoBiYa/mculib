@@ -1,20 +1,41 @@
+/* SPDX-License-Identifier: MIT */
 #ifndef MCULIB_COMMON_CRITICAL_H
 #define MCULIB_COMMON_CRITICAL_H
 
 #include <stdint.h>
 
 /*
- * 临界区
+ * Critical sections.
  *
- * 用于保护多指令读-改-写、多变量一致性。
+ * Used to protect multi-instruction read-modify-write sequences and
+ * multi-variable invariants.
  *
- * 支持嵌套：每次 enter 必须配对一次 exit。
- * 上下文：任务上下文可用；不可在中断内使用。
+ * Nesting is supported: every critical_enter() must be paired with exactly
+ * one critical_exit().
  *
- * 实现由适配层提供，无原生原子指令时降级为关中断。
+ * Context: task context only. Must not be used from interrupt context, and
+ * must not wrap calls that block, sleep, or wait.
+ *
+ * The implementation is provided by the adapter layer; it degrades to
+ * disabling interrupts on targets without atomic instructions.
  */
 
+/**
+ * critical_enter() - enter a critical section
+ *
+ * Context: task context. Interrupts may be disabled on return.
+ *
+ * Return: state to pass to the matching critical_exit().
+ */
 uint32_t critical_enter(void);
+
+/**
+ * critical_exit() - leave a critical section
+ * @state: state returned by the matching critical_enter()
+ *
+ * Context: task context. Must be called exactly once per critical_enter(),
+ * and in reverse nesting order.
+ */
 void critical_exit(uint32_t state);
 
-#endif
+#endif /* MCULIB_COMMON_CRITICAL_H */

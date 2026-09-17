@@ -1,18 +1,20 @@
+/* SPDX-License-Identifier: MIT */
 #ifndef MCULIB_COMMON_LOG_H
 #define MCULIB_COMMON_LOG_H
 
 /*
- * 日志
+ * Logging.
  *
- * 编译期裁剪：
- *   通过 MCULIB_LOG_LEVEL 控制，未达级别的调用完全展开为空。
- *   发布构建通常裁掉 DEBUG / INFO。
+ * Compile-time trimming: MCULIB_LOG_LEVEL selects the compile-time level,
+ * and calls below it expand to nothing. Release builds normally trim DEBUG
+ * and INFO.
  *
- * 上下文：
- *   任务上下文可用。
- *   中断上下文只允许 log_isr，且只写无锁环形缓冲区，不阻塞。
+ * Context: the log_error() / log_warn() / log_info() / log_debug() helpers
+ * are for task context. Interrupt context may only use log_isr(), which
+ * writes to a lock-free ring buffer and never blocks.
  *
- * 实现由适配层提供，后端可以是 UART、SWO、RTT、空实现。
+ * The implementation is provided by the adapter layer; the backend may be
+ * UART, SWO, RTT, or a stub.
  */
 
 #define MCULIB_LOG_NONE 0
@@ -30,7 +32,16 @@ void log_warn(const char *fmt, ...);
 void log_info(const char *fmt, ...);
 void log_debug(const char *fmt, ...);
 
-/* 中断内可用：只写无锁缓冲区，不阻塞 */
+/**
+ * log_isr() - log a message from interrupt context
+ * @fmt: printf-style format string
+ * @...: format arguments
+ *
+ * Only writes to a lock-free ring buffer and never blocks. The buffer is
+ * flushed by task context.
+ *
+ * Context: interrupt context.
+ */
 void log_isr(const char *fmt, ...);
 
-#endif
+#endif /* MCULIB_COMMON_LOG_H */

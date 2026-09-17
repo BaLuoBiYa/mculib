@@ -1,22 +1,36 @@
+/* SPDX-License-Identifier: MIT */
 #ifndef MCULIB_COMMON_DELAY_H
 #define MCULIB_COMMON_DELAY_H
 
 #include <stdint.h>
 
 /*
- * 延时工具
+ * Delay helpers.
  *
- * 上下文约束：
- *   delay_ms：仅任务上下文。中断内禁止。
- *   delay_us：任务或中断上下文。中断内必须极短，且不依赖任何中断。
- *
- * 临界区内禁止调用。
- *
- * 返回值：成功返回 0，失败返回负值。
- * 线程安全：是。可重入。
+ * Thread safety: yes, reentrant. Neither function may be called from a
+ * critical section; the context constraints are documented per function.
  */
 
+/**
+ * delay_us() - delay for a number of microseconds
+ * @us: delay in microseconds
+ *
+ * Context: task or interrupt context. Interrupt context must keep the delay
+ * very short.
+ *
+ * Return: %0 on success, negative error code on failure.
+ */
 int delay_us(uint32_t us);
+
+/**
+ * delay_ms() - delay for a number of milliseconds
+ * @ms: delay in milliseconds
+ *
+ * Context: task context only. May block, so it must not be called from
+ * interrupt context.
+ *
+ * Return: %0 on success, negative error code on failure.
+ */
 int delay_ms(uint32_t ms);
 
-#endif
+#endif /* MCULIB_COMMON_DELAY_H */
