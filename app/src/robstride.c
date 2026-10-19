@@ -7,11 +7,6 @@
 #include "common/byteorder.h"
 #include "common/time.h"
 
-/*
- * Limits per model, indexed by model, in the order v_min, v_max, kp_min,
- * kp_max, kd_min, kd_max, t_min, t_max. robstride.h lists the values each row
- * holds.
- */
 struct robstride_limits {
 	float v_min;
 	float v_max;
@@ -43,7 +38,6 @@ static const struct robstride_limits limits[] = {
 _Static_assert(sizeof(limits) / sizeof(limits[0]) == ROBSTRIDE_MODEL_COUNT,
 	       "the limit table must cover every model");
 
-/* Only used to validate the group, the runtime paths index the table. */
 static const struct robstride_limits *
 robstride_limits_get(robstride_model_t model)
 {
@@ -54,7 +48,6 @@ robstride_limits_get(robstride_model_t model)
 	return &limits[model];
 }
 
-/* Clamping and truncation match the reference driver. */
 static uint16_t robstride_scale(float x, float x_min, float x_max)
 {
 	if (x < x_min) {
@@ -72,14 +65,13 @@ static float robstride_unscale(uint16_t x, float x_min, float x_max)
 	return x_min + (((float)x * (x_max - x_min)) / 65535.0f);
 }
 
-/* CAN_EFF_FLAG marks the frame as extended, as the CAN contract asks. */
 static uint32_t robstride_build_id(uint8_t id, uint16_t data, uint8_t cmd)
 {
 	return CAN_EFF_FLAG | ((uint32_t)(cmd & 0x1Fu) << 24) |
 	       ((uint32_t)data << 8) | id;
 }
 
-/* The torque travels in the identifier, the rest in the payload. */
+/* Torque in the identifier, the scaled values in the payload. */
 static void robstride_frame_control(const struct robstride_motor *motor,
 				    const struct robstride_cmd *cmd,
 				    struct can_msg *msg)
@@ -111,7 +103,6 @@ static void robstride_queue(struct robstride *bus, uint8_t index,
 	bus->pending_mask |= 1u << index;
 }
 
-/* Enable and disable frames differ only in the command code. */
 static void robstride_gate(struct robstride *bus, uint8_t cmd)
 {
 	uint8_t i;
@@ -140,28 +131,24 @@ static int robstride_find(const struct robstride *bus, uint8_t id)
 	return -1;
 }
 
-/* A zero timeout: a refused frame stays pending for the next call. */
 static void robstride_flush(struct robstride *bus)
 {
+	uint32_t mask = bus->pending_mask;
 	uint8_t i;
 
-	for (i = 0; i < bus->motor_count; i++) {
-		if ((bus->pending_mask & (1u << i)) == 0) {
-			continue;
-		}
+	bus->pending_mask = 0;
 
-		if (can_send(bus->can, &bus->pending[i], 0) == CAN_OK) {
-			bus->pending_mask &= ~(1u << i);
+	for (i = 0; i < bus->motor_count; i++) {
+		if ((mask & (1u << i)) != 0) {
+			(void)can_send(bus->can, &bus->pending[i], 0);
 		}
 	}
 }
 
 static void robstride_apply(struct robstride *bus, uint8_t index,
-			    const struct robstride_frame *frame,
-			    uint32_t now_ms)
+			    const struct robstride_frame *frame)
 {
 	const uint8_t *data = frame->msg.data;
-	/* Validated by robstride_init(). */
 	const struct robstride_limits *lim = &limits[bus->motor[index].model];
 	struct robstride_state *state = &bus->state[index];
 	uint16_t raw;
@@ -169,23 +156,20 @@ static void robstride_apply(struct robstride *bus, uint8_t index,
 	raw = get_u16be(&data[0]);
 	state->position = robstride_unscale(raw, -ROBSTRIDE_POS_RANGE,
 					    ROBSTRIDE_POS_RANGE);
+
 	raw = get_u16be(&data[2]);
 	state->velocity = robstride_unscale(raw, lim->v_min, lim->v_max);
+
 	raw = get_u16be(&data[4]);
 	state->torque = robstride_unscale(raw, lim->t_min, lim->t_max);
+
 	state->temp = (float)get_u16be(&data[6]) / 10.0f;
-	/* The fault mask and the mode state are fields of the identifier. */
 	state->faults = (uint8_t)((frame->msg.id >> 16) & 0x3Fu);
 	state->mode = (robstride_mode_t)((frame->msg.id >> 22) & 0x03u);
-	state->timestamp_ms = now_ms;
-	state->valid = true;
+	state->timestamp_ms = frame->timestamp_ms;
 }
 
-/*
- * Receive callback, interrupt context: only queue the frame. A full queue
- * drops the newest frame instead of overwriting buffered ones, which is what
- * keeps the queue usable without a lock.
- */
+/* Interrupt context: stamp the arrival time and queue the frame. */
 static void robstride_can_rx_cb(struct can_dev *dev, const struct can_msg *msg,
 				uint32_t errors, void *ctx)
 {
@@ -196,6 +180,7 @@ static void robstride_can_rx_cb(struct can_dev *dev, const struct can_msg *msg,
 			.dlc = msg->dlc,
 		},
 		.errors = errors,
+		.timestamp_ms = time_now_ms(),
 	};
 
 	(void)dev;
@@ -275,11 +260,9 @@ void robstride_disable(struct robstride *bus)
 int robstride_process(struct robstride *bus)
 {
 	struct robstride_frame frame;
-	uint32_t now_ms = 0;
-	bool have_now = false;
 	int decoded = 0;
 
-	/* Pending frames first, a command stored now still goes out. */
+	/* Transmit first, then decode. */
 	robstride_flush(bus);
 
 	while (robstride_rx_pop(&bus->rx, &frame)) {
@@ -296,15 +279,9 @@ int robstride_process(struct robstride *bus)
 			continue;
 		}
 
-		/* Read once per batch: an idle bus costs no clock read. */
-		if (!have_now) {
-			now_ms = time_now_ms();
-			have_now = true;
-		}
+		robstride_apply(bus, (uint8_t)index, &frame);
 
-		robstride_apply(bus, (uint8_t)index, &frame, now_ms);
-
-		/* Bus errors stay internal, they are not motor faults. */
+		/* Bus errors are counted, not reported as motor faults. */
 		if (frame.errors != 0) {
 			bus->rx_errors++;
 		}

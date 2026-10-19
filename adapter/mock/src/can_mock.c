@@ -35,10 +35,6 @@ void can_host_mock_bind(struct can_dev *dev, FILE *stream,
 	priv_used++;
 }
 
-/*
- * Fields are written one by one, so no padding of struct can_msg reaches the
- * stream and no payload byte is left uninitialized on the way back.
- */
 static void can_mock_encode(uint8_t rec[CAN_MOCK_RECORD_LEN],
 			    const struct can_msg *msg)
 {
@@ -74,9 +70,7 @@ int can_send(struct can_dev *dev, const struct can_msg *msg, uint32_t timeout)
 	can_mock_encode(rec, msg);
 
 	if (fwrite(rec, 1, sizeof(rec), p->stream) != sizeof(rec)) {
-		/* The contract has no I/O error code, CAN_ERR_BUSY is the one
-		 * result a caller is expected to retry.
-		 */
+		/* The record did not reach the stream. */
 		return CAN_ERR_BUSY;
 	}
 
@@ -90,10 +84,7 @@ int can_send_async(struct can_dev *dev, const struct can_msg *msg,
 {
 	int rc = can_send(dev, msg, 0);
 
-	/*
-	 * The stream completes immediately, so the callback runs in the
-	 * caller context. The contract requires both outcomes to reach it.
-	 */
+	/* A stream transfer completes in the caller context. */
 	cb(dev, rc, 0, ctx);
 
 	return CAN_OK;
@@ -104,11 +95,7 @@ int can_recv_async(struct can_dev *dev, can_rx_cb_t cb, void *ctx)
 	struct can_host_priv *p = dev->priv;
 	uint8_t rec[CAN_MOCK_RECORD_LEN];
 
-	/*
-	 * The contract allows one subscription per device: registering again
-	 * while one is active is a caller breach, and rejecting it here keeps
-	 * the mistake visible instead of silently replacing the subscription.
-	 */
+	/* One subscription per device, see can_recv_async(). */
 	if (p->rx_active) {
 		return CAN_ERR_BUSY;
 	}

@@ -81,34 +81,13 @@ int gpio_toggle(struct gpio_dev *dev);
 int gpio_read(struct gpio_dev *dev, uint8_t *value);
 
 /**
- * gpio_irq_enable() - enable the pin interrupt and register the callback
- * @dev: GPIO device
- * @cb: interrupt callback, must not be NULL
- * @ctx: user context passed to @cb
- *
- * Context: task context. Registration is not atomic with respect to a pending
- * interrupt.
- *
- * Registers @cb once; it stays registered until gpio_irq_disable(). Enabling
- * an already enabled interrupt is a contract breach, and gpio_irq_disable()
- * followed by a new gpio_irq_enable() is the only way to replace @cb or @ctx.
- *
- * Return: %0 on success, negative error code on failure.
- */
-int gpio_irq_enable(struct gpio_dev *dev, gpio_irq_cb_t cb, void *ctx);
-
-/**
- * gpio_irq_disable() - disable the pin interrupt and clear the callback
+ * gpio_abrot() - abort all callbacks
  * @dev: GPIO device
  *
  * Context: task context.
  *
- * After it returns no further callback will be invoked for this device and
- * @ctx may be released. Disabling an already disabled interrupt returns the
- * same value.
- *
  * Return: %0 on success, negative error code on failure.
  */
-int gpio_irq_disable(struct gpio_dev *dev);
+int gpio_abrot(struct gpio_dev *dev);
 
 #endif /* SUBSYSTEM_GPIO_H */

@@ -11,14 +11,14 @@
  *
  *   #if MCULIB_BYTE_ORDER == MCULIB_BYTE_ORDER_LITTLE
  *
- * The name is prefixed because BYTE_ORDER, LITTLE_ENDIAN and BIG_ENDIAN are
- * already defined by system headers such as <netinet/in.h>.
+ * The name is prefixed because system headers define BYTE_ORDER, LITTLE_ENDIAN
+ * and BIG_ENDIAN.
  *
- * The conversions are written as shifts, so they produce the same bytes on any
- * target and need neither the macros above nor an aligned pointer: a pointer to
- * any byte of a protocol frame is a valid argument. The big-endian variants
- * store the most significant byte first, the little-endian variants the least
- * significant byte first, and put_* writes exactly the width in bytes.
+ * The big-endian variants store the most significant byte first, the
+ * little-endian variants the least significant byte first, and put_* writes
+ * exactly the width in bytes. A pointer to any byte of a frame is a valid
+ * argument, the conversions need no alignment. They do not depend on the macros
+ * above.
  */
 
 #define MCULIB_BYTE_ORDER_LITTLE 1

@@ -47,7 +47,7 @@ struct timer_config {
  * Context: interrupt context.
  *
  * Invoked on every period in periodic mode, once per run in one-shot mode.
- * @ctx must stay valid until timer_stop() returns.
+ * @ctx must stay valid until timer_abrot() returns.
  *
  * Must not block, sleep, wait, allocate, or call any subsystem API; execution
  * time must be bounded. May run concurrently with task context on the same
@@ -63,12 +63,12 @@ typedef void (*timer_cb_t)(struct timer_dev *dev, void *ctx);
  *
  * Context: task context.
  *
- * Registers @cb until timer_stop() clears it. In one-shot mode the counter
+ * Registers @cb until timer_abrot() clears it. In one-shot mode the counter
  * stops after the callback; the registration does not.
  *
  * Calling this while the timer is running is a contract breach, and so is
  * replacing @cb or @ctx while it runs. With the counter stopped - after
- * timer_stop() or after a one-shot completion - this call re-registers and is
+ * timer_abrot() or after a one-shot completion - this call re-registers and is
  * how the timer is armed again.
  *
  * Return: TIMER_OK on success, negative error code on failure.
@@ -76,7 +76,7 @@ typedef void (*timer_cb_t)(struct timer_dev *dev, void *ctx);
 int timer_start(struct timer_dev *dev, timer_cb_t cb, void *ctx);
 
 /**
- * timer_stop() - stop the timer and clear the registration
+ * timer_abrot() - stop the timer and clear the registration
  * @dev: timer device
  *
  * Context: task context.
@@ -87,7 +87,7 @@ int timer_start(struct timer_dev *dev, timer_cb_t cb, void *ctx);
  *
  * Return: TIMER_OK on success, negative error code on failure.
  */
-int timer_stop(struct timer_dev *dev);
+int timer_abrot(struct timer_dev *dev);
 
 /**
  * timer_get_count() - read the current counter value

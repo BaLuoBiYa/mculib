@@ -1,5 +1,5 @@
 CC     := gcc
-CFLAGS := -Wall -Wextra -Wundef -std=c11 -Og -g3 -I.
+CFLAGS := -flto -Wall -Wextra -Wundef -std=c11 -Og -g3 -I.
 BUILD  := build/Debug
 OBJDIR := $(BUILD)/obj
 BIN    := $(BUILD)/hello_uart

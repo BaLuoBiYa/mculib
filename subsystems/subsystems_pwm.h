@@ -66,7 +66,7 @@ struct pwm_config {
 int pwm_start(struct pwm_dev *dev);
 
 /**
- * pwm_stop() - stop PWM output
+ * pwm_abrot() - stop PWM output
  * @dev: PWM device
  *
  * Context: task context.
@@ -76,7 +76,7 @@ int pwm_start(struct pwm_dev *dev);
  *
  * Return: PWM_OK on success, negative error code on failure.
  */
-int pwm_stop(struct pwm_dev *dev);
+int pwm_abrot(struct pwm_dev *dev);
 
 /**
  * pwm_set_duty() - set the duty cycle
