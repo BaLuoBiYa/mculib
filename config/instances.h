@@ -2,6 +2,14 @@
 #ifndef MCULIB_INSTANCES_H
 #define MCULIB_INSTANCES_H
 
+#include "subsystems/subsystems_uart.h"
+#include "subsystems/subsystems_spi_master.h"
+#include "subsystems/subsystems_i2c_master.h"
+#include "subsystems/subsystems_can.h"
+#include "subsystems/subsystems_timer.h"
+#include "subsystems/subsystems_pwm.h"
+#include "subsystems/subsystems_gpio.h"
+
 /*
  * Peripheral instance limits.
  *

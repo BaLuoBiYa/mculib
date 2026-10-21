@@ -31,4 +31,17 @@
 /* #define TIME_BACKEND_STM32_HAL */
 #define TIME_BACKEND_HOST_MOCK
 
+#if defined(UART_BACKEND_HOST_MOCK)
+#include <adapter/mock/inc/uart_mock.h>
+#endif
+#if defined(SPI_BACKEND_HOST_MOCK)
+#include <adapter/mock/inc/spi_mock.h>
+#endif
+#if defined(CAN_BACKEND_HOST_MOCK)
+#include <adapter/mock/inc/can_mock.h>
+#endif
+// #if defined(TIME_BACKEND_HOST_MOCK)
+// #include <adapter/mock/inc/time_mock.h>
+// #endif
+
 #endif /* CONFIG_BACKEND_H */
